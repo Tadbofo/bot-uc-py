@@ -7,17 +7,16 @@ from discord import Embed
 from flask import Flask
 from threading import Thread
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from dotenv import load_dotenv
 
-load_dotenv()
-
-TOKEN = os.getenv("TOKEN")
-RSS_URL = os.getenv("RSS_URL")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-ROLE_ID = 1465209219497328798
+# ─── CONFIGURACIÓN ────────────────────────────────────────
+TOKEN = os.environ.get("TOKEN")  # Poner en Render variables de entorno
+RSS_URL = os.environ.get("RSS_URL")
+CHANNEL_ID = int(os.environ.get("CHANNEL_ID"))
+ROLE_ID = int(os.environ.get("ROLE_ID", 1465209219497328798))  # Default opcional
 
 DATA_FILE = "lastNews.json"
 
+# ─── SERVIDOR WEB PARA RENDER ─────────────────────────────
 app = Flask('')
 
 @app.route('/')
@@ -30,13 +29,13 @@ def run_web():
 
 Thread(target=run_web).start()
 
-
+# ─── DISCORD BOT ─────────────────────────────────────────
 intents = discord.Intents.default()
-intents.message_content = True  
+intents.message_content = True  # Necesario para comandos
 
 client = discord.Client(intents=intents)
 
-
+# ─── GUARDAR / LEER ÚLTIMA NOTICIA ───────────────────────
 def get_last_link():
     if not os.path.exists(DATA_FILE):
         return None
@@ -47,14 +46,14 @@ def save_last_link(link):
     with open(DATA_FILE, "w") as f:
         json.dump({"lastLink": link}, f)
 
-
+# ─── FUNCIÓN RSS ──────────────────────────────────────────
 async def check_rss(first_run=False):
     print("Revisando RSS...")
 
     try:
         response = requests.get(RSS_URL, timeout=10)
         response.raise_for_status()
-        content = response.text.encode('utf-8', errors='ignore')  
+        content = response.text.encode('utf-8', errors='ignore')
         feed = feedparser.parse(content)
     except Exception as e:
         print("Error al obtener el feed:", e)
@@ -69,13 +68,13 @@ async def check_rss(first_run=False):
     last_link = get_last_link()
     new_entries = []
 
-  
+    # Primera ejecución: solo guarda última noticia
     if first_run and last_link is None:
-        print("Primera ejecución: guardando la última noticia sin enviar nada.")
+        print("Primera ejecución: guardando última noticia sin enviar.")
         save_last_link(feed.entries[0].link)
         return
 
-   
+    # Recoger solo las noticias nuevas
     for entry in feed.entries:
         if entry.link == last_link:
             break
@@ -85,11 +84,9 @@ async def check_rss(first_run=False):
         print("No hay noticias nuevas")
         return
 
-
+    # Enviar noticias nuevas
     channel = await client.fetch_channel(CHANNEL_ID)
     for entry in reversed(new_entries):
-        print("Preparando noticia:", entry.title, entry.link)
-
         embed = Embed(
             title=entry.title,
             url=entry.link,
@@ -100,10 +97,9 @@ async def check_rss(first_run=False):
         await channel.send(content=f"<@&{ROLE_ID}>", embed=embed)
         print("Noticia enviada:", entry.title)
 
-
     save_last_link(feed.entries[0].link)
 
-
+# ─── EVENTO READY ─────────────────────────────────────────
 @client.event
 async def on_ready():
     print(f"Bot conectado como {client.user}")
@@ -112,10 +108,10 @@ async def on_ready():
     scheduler.add_job(lambda: check_rss(), "interval", minutes=10)
     scheduler.start()
 
-
+    # Primera ejecución
     await check_rss(first_run=True)
 
-
+# ─── COMANDO !funcionando ─────────────────────────────────
 @client.event
 async def on_message(message):
     if message.author == client.user:
@@ -124,5 +120,5 @@ async def on_message(message):
     if message.content.lower() == "!funcionando":
         await message.channel.send("Estoy funcionando ✅")
 
-
+# ─── INICIAR BOT ─────────────────────────────────────────
 client.run(TOKEN)
